@@ -186,6 +186,9 @@ module.exports = NodeHelper.create({
 	createURL: function(params) {
 		var url = this.config.apiBase;
 		url +="&accessId=" + encodeURIComponent(this.config.apiKey);
+		if (this.config.maximumDuration !== "") {
+			url += "&duration=" + encodeURIComponent(this.config.maximumDuration);
+		}
 		if (this.config.maximumEntries !== "") {
 			url += "&maxJourneys=" + encodeURIComponent(this.config.maximumEntries);
 		}

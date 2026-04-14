@@ -23,6 +23,7 @@ Module.register("MMM-ResRobot",{
 		],					// and a destination station ID from ResRobot, default: none
 		skipMinutes: 0,		// Skip entries that depart with the next <value> minutes
 		maximumEntries: 6,	// Maximum number of departures to display
+		maximumDuration: 1440,	// Time window in minutes to search for departures (1440 = 24h, ensures next departure is always found)
 		truncateAfter: 5,	// A value > 0 will truncate direction name at first space after <value> characters. 0 = no truncation
 		truncateLineAfter: 5,	// A value > 0 will truncate the line number after <value> characters. 0 = no truncation
 		showTrack: true,	// If true, track number will be displayed
