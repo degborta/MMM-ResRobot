@@ -180,8 +180,9 @@ Module.register("MMM-ResRobot",{
 
 		}
 		if (n === 0) {
-			// No departures found so resend config
-			this.initConfig();
+			wrapper.innerHTML = this.translate("NO_DEPARTURES") || "No departures found.";
+			wrapper.className = "dimmed light small";
+			return wrapper;
 		}
 		return table;
 	},

@@ -162,17 +162,16 @@ module.exports = NodeHelper.create({
 	 * Output departures notification and schedule next update.
 	 */
 	sendDepartures: function() {
-		// Notify the main module that we have a list of departures
-		// Schedule update
+		// Sort departures by ascending time
 		if (this.departures.length > 0) {
-			// Sort departures by ascending time
 			this.departures.sort(function(a, b) {
 				if (a.timestamp < b.timestamp) return -1;
 				if (a.timestamp > b.timestamp) return 1;
 				return 0;
  			});
-			this.sendSocketNotification("DEPARTURES", this.departures);
 		}
+		// Always notify client so it doesn't stay stuck at "Fetching departures"
+		this.sendSocketNotification("DEPARTURES", this.departures);
 		this.scheduleUpdate();
 	},
 
