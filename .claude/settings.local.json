@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:www.trafiklab.se)"
+      "WebFetch(domain:www.trafiklab.se)",
+      "Bash(python:*)"
     ]
   }
 }
