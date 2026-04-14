@@ -123,13 +123,16 @@ module.exports = NodeHelper.create({
 	saveDepartures: function(data) {
 		var now = moment();
 		var routeId = data.routeId;
+		if (!data.Departure || data.Departure.length === 0) {
+			return;
+		}
 		for (var i in data.Departure) {
 			var departure = data.Departure[i];
 			var departureTime = moment(departure.date + "T" + departure.time);
 			var waitingTime = departureTime.diff(now, "minutes");
-			var departureTransportNumber = departure.ProductAtStop.num; //departure.transportNumber;
+			var departureTransportNumber = departure.transportNumber;
 			var departureTo = departure.direction;
-			var departureType = departure.ProductAtStop.catOutS; //departure.Product.catOutS;
+			var departureType = departure.transportCategory;
 			// If truncation is requested, truncate ending station at first word break after n characters
 			if (this.config.truncateAfter > 0) {
 				if (departureTo.indexOf(" ",this.config.truncateAfter) > 0)  {
@@ -183,9 +186,6 @@ module.exports = NodeHelper.create({
 	createURL: function(params) {
 		var url = this.config.apiBase;
 		url +="&accessId=" + encodeURIComponent(this.config.apiKey);
-		if (this.config.maximumDuration !== "") {
-			url += "&duration=" + encodeURIComponent(this.config.maximumDuration);
-		}
 		if (this.config.maximumEntries !== "") {
 			url += "&maxJourneys=" + encodeURIComponent(this.config.maximumEntries);
 		}
