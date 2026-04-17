@@ -100,7 +100,13 @@ module.exports = NodeHelper.create({
 		} else {
 			var getRouteDepartures = getRoutes.map( (r) => {
 				return (async () => {
+					const maskedUrl = r.url.replace(/(accessId=)[^&]+/, "$1***");
+					Log.info("MMM-ResRobot: Fetching departures for route " + r.routeId + " from URL: " + maskedUrl);
 					const response = await fetch(r.url);
+					if (!response.ok) {
+						Log.error("MMM-ResRobot: API error " + response.status + " for route " + r.routeId);
+						return;
+					}
 					const json = await response.json();
 					json.routeId = r.routeId;
 					self.saveDepartures(json);
@@ -124,6 +130,7 @@ module.exports = NodeHelper.create({
 		var now = moment();
 		var routeId = data.routeId;
 		if (!data.Departure || data.Departure.length === 0) {
+			Log.warn("MMM-ResRobot: No departures in API response for route " + routeId + ". Response keys: " + Object.keys(data).join(", "));
 			return;
 		}
 		for (var i in data.Departure) {
@@ -186,7 +193,7 @@ module.exports = NodeHelper.create({
 		var url = this.config.apiBase;
 		url +="&accessId=" + encodeURIComponent(this.config.apiKey);
 		if (this.config.maximumDuration !== "") {
-			url += "&duration=" + encodeURIComponent(this.config.maximumDuration);
+			url += "&duration=" + encodeURIComponent(Math.min(this.config.maximumDuration, 1439));
 		}
 		if (this.config.maximumEntries !== "") {
 			url += "&maxJourneys=" + encodeURIComponent(this.config.maximumEntries);
