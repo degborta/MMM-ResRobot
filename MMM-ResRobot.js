@@ -28,6 +28,7 @@ Module.register("MMM-ResRobot",{
 		truncateLineAfter: 5,	// A value > 0 will truncate the line number after <value> characters. 0 = no truncation
 		showTrack: true,	// If true, track number will be displayed
 		getRelative: 0,		// Show relative rather than absolute time when less than <value> minutes left to departure, 0 = stay absolute
+		showTransportTypes: [],	// Empty = show all. Limit to specific types e.g. ["B"] for bus, ["B","J"] for bus and train
 		coloredIcons: false,	// Setting this to true will color departure icons according to colors in colorTable
 		iconTable: {
 			"B": "fa fa-bus",
@@ -75,8 +76,8 @@ Module.register("MMM-ResRobot",{
 
 	socketNotificationReceived: function(notification, payload) {
 		Log.log(this.name + " received a socket notification: " + notification + " - Payload: " + payload);
-		if (notification === "DEPARTURES") {
-			this.departures = payload;
+		if (notification === "DEPARTURES" && payload.identifier === this.identifier) {
+			this.departures = payload.departures;
 			this.loaded = true;
 			this.scheduleUpdate(0);
 		}
@@ -86,7 +87,7 @@ Module.register("MMM-ResRobot",{
 	initConfig: function() {
 		this.departures = [];
 		this.loaded = false;
-		this.sendSocketNotification("CONFIG", this.config);
+		this.sendSocketNotification("CONFIG", { identifier: this.identifier, config: this.config });
 	},
 
 	// Override dom generator.

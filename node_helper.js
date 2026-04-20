@@ -16,32 +16,31 @@ module.exports = NodeHelper.create({
 	// Define start sequence.
 	start: function() {
 		Log.info("Starting node_helper for module: " + this.name);
-		// Set locale.
 		moment.locale(config.language);
-		this.started = false;
+		this.instances = {};
 	},
 
 	// Receive notification
 	socketNotificationReceived: function(notification, payload) {
    		Log.info("node_helper for " + this.name + " received a socket notification: " + notification + " - Payload: " + JSON.stringify(payload, null, 2));
-		if (notification === "CONFIG") { // && this.started == false) {
-			this.config = payload;
-			this.started = true;
-			this.departures = [];
-			this.updateDepartures();
+		if (notification === "CONFIG") {
+			var id = payload.identifier;
+			this.instances[id] = { config: payload.config, departures: [] };
+			this.updateDepartures(id);
 		}
 	},
 
-	/* updateDepartures()
+	/* updateDepartures(identifier)
 	 * Check current departures and remove old ones. Requests new departure data if needed.
 	 */
-	updateDepartures: function() {
+	updateDepartures: function(identifier) {
 		var self = this;
+		var instance = this.instances[identifier];
 		var now = moment();
-		var cutoff = now.clone().add(moment.duration(this.config.skipMinutes, "minutes"));
+		var cutoff = now.clone().add(moment.duration(instance.config.skipMinutes, "minutes"));
 
 		// Sort current departures by routeId and departure time (descending)
-		this.departures.sort(function(a, b) {
+		instance.departures.sort(function(a, b) {
 			if (a.routeId < b.routeId) return -1;
 			if (a.routeId > b.routeId) return 1;
 			if (a.timestamp < b.timestamp) return 1;
@@ -52,15 +51,12 @@ module.exports = NodeHelper.create({
 		// Loop through current departures (by route) and skip old ones
 		var routeId = "";
 		var departures = [];
-		for (var d in this.departures) {
-			var dep = this.departures[d];
-			// New route, save id and initialize departures for the route
+		for (var d in instance.departures) {
+			var dep = instance.departures[d];
 			if (dep.routeId !== routeId) {
 				routeId = dep.routeId;
 				departures[routeId] = [];
 			}
-			// Only keep departures if they occur after current time + minutes to skip
-			// If old departure is found then we clear all saved departures for that route
 			var departureTime = moment(dep.timestamp);
 			if (departureTime.isAfter(cutoff)) {
 				departures[routeId].push(dep);
@@ -69,34 +65,26 @@ module.exports = NodeHelper.create({
 			}
 		}
 
-		// Clear departure list
-		this.departures = [];
-		// Loop through all routes in config
-		// If a route is missing departures, get departures for the route
-		// If a route has departures, save them to output
+		instance.departures = [];
 		var getRoutes = [];
-		for (var routeId in this.config.routes) {
+		for (var routeId in instance.config.routes) {
 			if (typeof departures[routeId] == 'undefined' || departures[routeId].length == 0) {
-				// Get current list of departures between from and to
-				var params = { "id": this.config.routes[routeId].from };
-				if (typeof this.config.routes[routeId].to == "string" && this.config.routes[routeId].to !== "") {
-					params["direction"] = this.config.routes[routeId].to;
+				var params = { "id": instance.config.routes[routeId].from };
+				if (typeof instance.config.routes[routeId].to == "string" && instance.config.routes[routeId].to !== "") {
+					params["direction"] = instance.config.routes[routeId].to;
 				}
-				var url = this.createURL(params);
+				var url = this.createURL(identifier, params);
 				getRoutes.push({"routeId": routeId, "url": url});
 			} else {
 				for (d in departures[routeId]) {
-					// Recalculate waitingTime
 					departures[routeId][d].waitingTime = moment(departures[routeId][d].timestamp).diff(now, "minutes");
 					Log.debug("WaitingTime: " + departures[routeId][d].waitingTime);
-					this.departures.push(departures[routeId][d]);
+					instance.departures.push(departures[routeId][d]);
 				}
 			}
 		}
-		// Array getRoutes contains id and url for each route that we need to retrieve departures for
 		if (getRoutes.length == 0) {
-			// Output departures and schedule update
-			this.sendDepartures();
+			this.sendDepartures(identifier);
 		} else {
 			var getRouteDepartures = getRoutes.map( (r) => {
 				return (async () => {
@@ -109,24 +97,23 @@ module.exports = NodeHelper.create({
 					}
 					const json = await response.json();
 					json.routeId = r.routeId;
-					self.saveDepartures(json);
+					self.saveDepartures(identifier, json);
 					return json;
 				})();
 			})
 
 			Promise.all(getRouteDepartures)
 			.then( () => {
-				self.sendDepartures();
+				self.sendDepartures(identifier);
 			});
 		}
 	},
 
-	/* saveDepartures(data, routeId)
+	/* saveDepartures(identifier, data)
 	 * Uses the received data to set the various values.
-	 *
-	 * argument data object - departure data in JSON format
 	 */
-	saveDepartures: function(data) {
+	saveDepartures: function(identifier, data) {
+		var instance = this.instances[identifier];
 		var now = moment();
 		var routeId = data.routeId;
 		if (!data.Departure || data.Departure.length === 0) {
@@ -138,65 +125,62 @@ module.exports = NodeHelper.create({
 			var departureTime = moment(departure.date + "T" + departure.time);
 			var waitingTime = departureTime.diff(now, "minutes");
 			var departureTransportNumber = departure.ProductAtStop.num;
-			var departureTo = departure.direction;
+			var departureTo = instance.config.routes[routeId].label || departure.direction;
 			var departureType = departure.ProductAtStop.catOutS;
-			// If truncation is requested, truncate ending station at first word break after n characters
-			if (this.config.truncateAfter > 0) {
-				if (departureTo.indexOf(" ",this.config.truncateAfter) > 0)  {
-					departureTo = departureTo.substring(0, departureTo.indexOf(" ",this.config.truncateAfter));
+			if (!instance.config.routes[routeId].label && instance.config.truncateAfter > 0) {
+				if (departureTo.indexOf(" ", instance.config.truncateAfter) > 0) {
+					departureTo = departureTo.substring(0, departureTo.indexOf(" ", instance.config.truncateAfter));
 				}
 			}
-			// If truncation of line number is requested, truncate line number after n characters
-			if (this.config.truncateLineAfter > 0) {
-				departureTransportNumber = departureTransportNumber.substring(0, this.config.truncateLineAfter);
+			if (instance.config.truncateLineAfter > 0) {
+				departureTransportNumber = departureTransportNumber.substring(0, instance.config.truncateLineAfter);
 			}
-			// Save dparture (if it is after now + skipMinutes)
-			if (departureTime.isSameOrAfter(now.clone().add(moment.duration(config.skipMinutes, 'minutes')))) {
-				this.departures.push({
-					routeId: routeId,				// Id for route, used for sorting
-					timestamp: departureTime,			// Departure timestamp, used for sorting
-					departureTime: departureTime.format("HH:mm"),	// Departure time in HH:mm, used for display
-					waitingTime: waitingTime,			// Relative time until departure (formatted by moment)
-					line: departureTransportNumber,			// Line number/name of departure
-					track: departure.rtTrack,			// Track number/name of departure
-					type: departureType,				// Short category code for departure
-					to: departureTo					// Destination/Direction
+			var allowedTypes = instance.config.showTransportTypes;
+			if (allowedTypes.length > 0 && !allowedTypes.includes(departureType.charAt(0))) {
+				continue;
+			}
+			if (departureTime.isSameOrAfter(now.clone().add(moment.duration(instance.config.skipMinutes, 'minutes')))) {
+				instance.departures.push({
+					routeId: routeId,
+					timestamp: departureTime,
+					departureTime: departureTime.format("HH:mm"),
+					waitingTime: waitingTime,
+					line: departureTransportNumber,
+					track: departure.rtTrack,
+					type: departureType,
+					to: departureTo
 				});
 			}
 		}
 	},
-	/* sendDepartures()
+	/* sendDepartures(identifier)
 	 * Output departures notification and schedule next update.
 	 */
-	sendDepartures: function() {
-		// Sort departures by ascending time
-		if (this.departures.length > 0) {
-			this.departures.sort(function(a, b) {
+	sendDepartures: function(identifier) {
+		var instance = this.instances[identifier];
+		if (instance.departures.length > 0) {
+			instance.departures.sort(function(a, b) {
 				if (a.timestamp < b.timestamp) return -1;
 				if (a.timestamp > b.timestamp) return 1;
 				return 0;
  			});
 		}
-		// Always notify client so it doesn't stay stuck at "Fetching departures"
-		this.sendSocketNotification("DEPARTURES", this.departures);
-		this.scheduleUpdate();
+		this.sendSocketNotification("DEPARTURES", { identifier: identifier, departures: instance.departures });
+		this.scheduleUpdate(identifier);
 	},
 
-	/* createURL()
+	/* createURL(identifier, params)
 	 * Generates a base url with api parameters based on the config.
-	 *
-	 * argument params object - an array of key: value pairs to add to url
-	 *
-	 * return String - URL.
 	 */
-	createURL: function(params) {
-		var url = this.config.apiBase;
-		url +="&accessId=" + encodeURIComponent(this.config.apiKey);
-		if (this.config.maximumDuration !== "") {
-			url += "&duration=" + encodeURIComponent(Math.min(this.config.maximumDuration, 1439));
+	createURL: function(identifier, params) {
+		var cfg = this.instances[identifier].config;
+		var url = cfg.apiBase;
+		url += "&accessId=" + encodeURIComponent(cfg.apiKey);
+		if (cfg.maximumDuration !== "") {
+			url += "&duration=" + encodeURIComponent(Math.min(cfg.maximumDuration, 1439));
 		}
-		if (this.config.maximumEntries !== "") {
-			url += "&maxJourneys=" + encodeURIComponent(this.config.maximumEntries);
+		if (cfg.maximumEntries !== "") {
+			url += "&maxJourneys=" + encodeURIComponent(cfg.maximumEntries);
 		}
 		for (var key in params) {
 			url += "&" + encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
@@ -204,21 +188,20 @@ module.exports = NodeHelper.create({
 		return url;
 	},
 
-	/* scheduleUpdate()
+	/* scheduleUpdate(identifier, delay)
 	 * Schedule next update.
-	 *
-	 * argument delay number - Milliseconds before next update. If empty, this.config.updateInterval is used.
 	 */
-	scheduleUpdate: function(delay) {
+	scheduleUpdate: function(identifier, delay) {
 		var self = this;
-		var nextLoad = this.config.updateInterval;
+		var instance = this.instances[identifier];
+		var nextLoad = instance.config.updateInterval;
 		if (typeof delay !== "undefined" && delay >= 0) {
 			nextLoad = delay;
 		}
 
-		clearTimeout(this.updateTimer);
-		this.updateTimer = setTimeout(function() {
-			self.updateDepartures();
+		clearTimeout(instance.updateTimer);
+		instance.updateTimer = setTimeout(function() {
+			self.updateDepartures(identifier);
 		}, nextLoad);
 	}
 });
